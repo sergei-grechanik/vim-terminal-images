@@ -4,12 +4,12 @@ if exists('g:loaded_terminal_images_plugin')
 endif
 let g:loaded_terminal_images_plugin = 1
 
-" Highlighting groups TerminalImagesLine0..TerminalImagesLine255 are used for the
-" corresponding image lines.
-for i in range(0, 255)
-    let higroup_name = "TerminalImagesLine" . string(i)
+" Highlighting groups TerminalImagesID1..TerminalImagesID255 are used for the
+" corresponding image IDs.
+for i in range(1, 255)
+    let higroup_name = "TerminalImagesID" . string(i)
     execute "hi " . higroup_name . " ctermfg=" . string(i)
-    let prop_name = "TerminalImagesLine" . string(i)
+    let prop_name = "TerminalImagesID" . string(i)
     if !empty(prop_type_get(prop_name))
         call prop_type_delete(prop_name)
     endif
@@ -20,42 +20,17 @@ let s:path = fnamemodify(resolve(expand('<sfile>:p')), ':h')
 
 let g:terminal_images_max_columns = get(g:, 'terminal_images_max_columns', 100)
 let g:terminal_images_max_rows = get(g:, 'terminal_images_max_rows', 30)
-let g:terminal_images_command =
-    \ get(g:, 'terminal_images_command',
-        \ s:path . "/../../upload-terminal-image.sh")
+
+if !exists('g:terminal_images_command')
+    let g:terminal_images_command =
+                \ executable('tupimage') ?
+                \ 'tupimage' : (s:path . "/../tupimage-bundled.sh")
+endif
 
 " Show image under cursor in a popup window
 command ShowImageUnderCursor :call ShowImageUnderCursor()
 " Same thing but do not show error messages if the file is not found
 command ShowImageUnderCursorIfReadable :call ShowImageUnderCursor(1)
-
-function! ComputeBestImageSize(filename)
-    let maxcols = min([g:terminal_images_max_columns, &columns, winwidth(0) - 6])
-    let maxrows = min([g:terminal_images_max_rows, &lines, winheight(0) - 2])
-    let maxcols = max([g:terminal_images_min_columns, maxcols])
-    let maxrows = max([g:terminal_images_min_rows, maxrows])
-    let filename_expanded = resolve(expand(a:filename))
-    let filename_str = shellescape(filename_expanded)
-    let res = system("identify -format '%w %h %x %y'-units PixelsPerInch " . filename_str)
-    if res == ""
-        return [maxcols, maxrows]
-    endif
-    let whxy = split(res, ' ')
-    let w = str2float(whxy[0])/str2float(whxy[2])
-    let h = str2float(whxy[1])/str2float(whxy[3])
-    let w = w * g:terminal_images_columns_per_inch
-    let h = h * g:terminal_images_rows_per_inch
-    if w > maxcols
-        let h = h * maxcols / w
-        let w = maxcols
-    endif
-    if h > maxrows
-        let w = w * maxrows / h
-        let h = maxrows
-    endif
-    return [max([g:terminal_images_min_columns, float2nr(w)]),
-           \ max([g:terminal_images_min_rows, float2nr(h)])]
-endfun
 
 " Upload the given image with the given size. If `cols` and `rows` are zero, the
 " best size will be computed automatically. The image will be fit to width or
@@ -74,45 +49,63 @@ function! UploadTerminalImage(filename, cols, rows)
     let rows_str = a:rows ? " -r " . shellescape(string(a:rows)) : ""
     let filename_expanded = resolve(expand(a:filename))
     let filename_str = shellescape(filename_expanded)
-    let tmpfile = tempname()
-    " We use a bash script to upload the file. We ask it to write lines
-    " representing the image to `tmpfile` and disable outputting escape codes
-    " for line numbers (--noesc) because we assign them by ourselves using text
+    let outfile = tempname()
+    let errfile = tempname()
+    let infofile = tempname()
+
+    " We use a script to upload the file. We ask it to write lines
+    " representing the image to `outfile` and disable outputting escape codes
+    " for the image id (--noesc) because we assign them by ourselves using text
     " properties.
     let command = g:terminal_images_command .
                 \ cols_str .
                 \ rows_str .
                 \ " --max-cols " . string(maxcols) .
                 \ " --max-rows " . string(maxrows) .
-                \ " -e " . shellescape(tmpfile) .
-                \ " -o " . shellescape(tmpfile) .
+                \ " -e " . shellescape(errfile) .
+                \ " -o " . shellescape(outfile) .
+                \ " --save-info " . shellescape(infofile) .
                 \ " --noesc " .
+                \ " --256 " .
                 \ " " . filename_str .
                 \ " < /dev/tty > /dev/tty"
     call system(command)
     if v:shell_error != 0
-        if filereadable(tmpfile)
-            let err_message = readfile(tmpfile)[0]
-            call delete(tmpfile)
+        if filereadable(errfile)
+            let err_message = readfile(errfile)[0]
+            call delete(errfile)
             throw "Uploading error: " . err_message
         endif
         throw "Command failed: " . command
     endif
-    let lines = readfile(tmpfile)
+
+    " Get image id from infofile.
+    let id = ''
+    for infoline in readfile(infofile)
+        let id = matchstr(infoline, '^id[ \t]\+\zs[0-9]\+\ze$')
+        if id != ''
+            break
+        endif
+    endfor
+    if id == ''
+        throw "Could not read id from " . infofile
+    endif
+    call delete(infofile)
+
+    " Read outfile and convert it to something suitable for floating windows.
+    let lines = readfile(outfile)
     let result = []
-    let i = 0
+    " We use text properties to assign each line the foreground color
+    " corresponding to the image id.
+    let prop_type = "TerminalImagesID" . id
     for line in lines
-        " We use text properties to assign each line the foreground color
-        " corresponding to the row number.
-        let prop_type = "TerminalImagesLine" . string(i)
         call add(result,
                  \ {'text': line,
                  \  'props': [{'col': 1,
                  \             'length': len(line),
                  \             'type': prop_type}]})
-        let i += 1
     endfor
-    call delete(tmpfile)
+    call delete(outfile)
     return result
 endfun
 
