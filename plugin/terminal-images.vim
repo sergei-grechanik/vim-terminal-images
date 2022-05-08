@@ -4,6 +4,12 @@ if exists('g:loaded_terminal_images_plugin')
 endif
 let g:loaded_terminal_images_plugin = 1
 
+" Highlight group used for floating window background. The background can also
+" be controlled in per-buffer manner by setting `b:terminal_images_background`.
+if !hlexists('TerminalImagesBackground')
+    highlight link TerminalImagesBackground Pmenu
+endif
+
 " Highlighting groups TerminalImagesID1..TerminalImagesID255 are used for the
 " corresponding image IDs.
 for i in range(1, 255)
@@ -163,7 +169,10 @@ function! ShowImageUnderCursor(...) abort
         return
     endtry
     call popup_close(uploading_message)
-    return popup_atcursor(text, #{wrap: 0})
+    let background_higroup =
+                \ get(b:, 'terminal_images_background', 'TerminalImagesBackground')
+    return popup_atcursor(text,
+                \ #{wrap: 0, highlight: background_higroup})
 endfun
 
 " Experimental function to show image somewhere not under cursor.
