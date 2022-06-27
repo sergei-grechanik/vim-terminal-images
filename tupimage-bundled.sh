@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # vim: shiftwidth=4
 
@@ -6,12 +6,9 @@
 #       portable.
 
 # TODO list:
+# - Fit status message to terminal width.
 # - Fail on uploading error.
-# - Better indication of cell image uploading
-# - Fix names and better comments in graphics.c
-# - Fix the help description
 # - Deleting images from session.
-# - Query the terminal when deciding whether to fix an image.
 
 script_fullname="$0"
 script_name="$(basename $0)"
@@ -70,18 +67,23 @@ automatic script running within tmux (tmux makes image uploading unreliable).
   General options:
     -f <image_file>, --file <image_file>
         The image file (but you can specify it as a positional argument).
+    --tty <file>
+        Use the given file to communicate with the terminal and output status
+        messages instead of /dev/tty.
     -e <file>, --err <file>
         Use <file> to output error messages in addition to displaying them as
         the status.
     -l <file>, --log <file>
         Enable logging and write logs to <file>.
     -V
-        Same as -l /dev/stderr (i.e. be very verbose).
+        Same as --log /dev/stderr (i.e. be very verbose).
     -q, --quiet
         Do not show status messages or uploading progress. Error messages are
-        still shown (but you can redirect them with -e).
+        still shown (but you can redirect them with --err).
     --save-info <file>
         Save some information to <file> (like image id, rows, columns, etc).
+    --abort-on-keypress
+        Abort when there is an input from the user.
     -h
         Show brief help.
     --help
@@ -92,16 +94,22 @@ automatic script running within tmux (tmux makes image uploading unreliable).
     -r N, --rows N
         The number of columns and rows for the image. By default the script will
         try to compute the optimal values by itself.
-    -o <file>, --output <file>
+    -x COLUMN, -y LINE
+        Place the image and the status line at the given absolute coordinates.
+        The coordinates are 1-based. Note that the output will use ANSI cursor
+        movement sequences instead of \\n.
+    -o <file>, --out <file>, --output <file>
         Use <file> to output the characters representing the image, instead of
         stdout.
-    -a, --append
-        Do not clear the output file (the one specified with -o).
     --noesc
         Do not issue the escape codes representing row numbers (encoded as
         foreground color).
+    --less-diacritics
+        Don't use column diacritics and specify the row number only in the first
+        cell of a row. This will make the placeholder more lightweight but less
+        reliable if it's partially obscured.
     --show-id N
-        Display the image with the given id. The image may be reuploaded if
+        Display the image with the given id. The image will be reuploaded if
         needed.
 
   ID assignment options:
@@ -158,20 +166,25 @@ automatic script running within tmux (tmux makes image uploading unreliable).
         Floating point values specifying the number of terminal columns and rows
         per inch (may be approximate). Used to compute the optimal number of
         columns and rows when -c and -r are not specified. If these parameters
-        are not specified, the environment variables
-        TUPIMAGE_COLS_PER_INCH and TUPIMAGE_ROWS_PER_INCH will
-        be used. If they are not specified either, 12.0 and 6.0 will be used as
-        columns per inch and rows per inch respectively.
-    --override-dpi N
-        Override dpi value for the image (both vertical and horizontal). By
-        default dpi values will be requested using the 'identify' utility.
+        are not specified, TUPIMAGE_COLS_PER_INCH and TUPIMAGE_ROWS_PER_INCH
+        will be used. If they are not specified either, 12.0 and 6.0 will be
+        used as columns per inch and rows per inch respectively.
+    --get-cells-per-inch
+        Queries the terminal and gets Xft.dpi to compute the number of columns
+        per inch and rows per inch and writes them to stdout. May be used to
+        initialize TUPIMAGE_COLS_PER_INCH and TUPIMAGE_ROWS_PER_INCH (e.g. in
+        bashrc). Prints three numbers separated by space symbols: cols per inch,
+        rows per inch, screen dpi.
+    --override-ppi N
+        Override ppi value for the image (both vertical and horizontal). By
+        default ppi values will be requested using the 'identify' utility.
 
   Environment variables:
     TUPIMAGE_COLS_PER_INCH
     TUPIMAGE_ROWS_PER_INCH
         See  --cols-per-inch and --rows-per-inch.
-    TUPIMAGE_OVERRIDE_DPI
-        See --override-dpi.
+    TUPIMAGE_OVERRIDE_PPI
+        See --override-ppi.
     TUPIMAGE_CACHE_DIR
         The directory to store images being uploaded (in case if they need to be
         reuploaded) and session databases.
@@ -228,6 +241,8 @@ num_images_to_delete=4
 
 cols=""
 rows=""
+start_x=""
+start_y=""
 max_cols=""
 max_rows=""
 use_256=""
@@ -235,17 +250,19 @@ image_id=""
 cols_per_inch="$TUPIMAGE_COLS_PER_INCH"
 rows_per_inch="$TUPIMAGE_ROWS_PER_INCH"
 cache_dir="$TUPIMAGE_CACHE_DIR"
-override_dpi="$TUPIMAGE_OVERRIDE_DPI"
+override_ppi="$TUPIMAGE_OVERRIDE_PPI"
 file=""
 out="/dev/stdout"
 err=""
+tty="/dev/tty"
 log=""
 quiet=""
+abort_on_keypress=""
 noesc=""
+less_diacritics=""
 save_info=""
 no_upload=""
 force_upload=""
-append=""
 uploading_method="$TUPIMAGE_UPLOADING_METHOD"
 tmux_hijack_allowed="1"
 [[ -z "$TUPIMAGE_NO_TMUX_HIJACK" ]] || tmux_hijack_allowed=""
@@ -257,50 +274,15 @@ last_n=""
 reupload=""
 reupload_ids=()
 
-list_images=""
-clear_term=""
-clear_id=""
-clean_cache=""
-show_status=""
-show_id=""
+cmd_list_images=""
+cmd_clear_term=""
+cmd_clear_id=""
+cmd_clean_cache=""
+cmd_show_status=""
+cmd_show_id=""
+cmd_get_cells_per_inch=""
 
 command_count=0
-
-# A utility function to print logs
-echolog() {
-    if [[ -n "$log" ]]; then
-        (flock 1; echo "$$ $(date +%s.%3N) $1") >> "$log"
-    fi
-}
-
-# A utility function to display what the script is doing.
-echostatus() {
-    echolog "$1"
-    if [[ -z "$quiet" ]]; then
-        # clear the current line
-        echo -en "\033[2K\r"
-        # And display the status
-        echo -n "$1"
-    fi
-}
-
-# Display a message, both as the status and to $err.
-echomessage() {
-    if [[ -z "$err" ]]; then
-        echostatus ""
-        echo "$1" >> /dev/stderr
-        echolog "$1"
-    else
-        echostatus "$1"
-        echo "$1" >> "$err"
-    fi
-}
-
-# Display an error message, both as the status and to $err, prefixed with
-# "error:".
-echoerr() {
-    echomessage "error: $1"
-}
 
 # Parse the command line.
 while [[ $# -gt 0 ]]; do
@@ -313,16 +295,24 @@ while [[ $# -gt 0 ]]; do
             rows="$2"
             shift 2
             ;;
-        -a|--append)
-            append="1"
-            shift
+        -x)
+            start_x="$2"
+            shift 2
             ;;
-        -o|--output)
+        -y)
+            start_y="$2"
+            shift 2
+            ;;
+        -o|--out|--output)
             out="$2"
             shift 2
             ;;
         -e|--err)
             err="$2"
+            shift 2
+            ;;
+        --tty)
+            tty="$2"
             shift 2
             ;;
         -l|--log)
@@ -337,6 +327,10 @@ while [[ $# -gt 0 ]]; do
             quiet="1"
             shift
             ;;
+        --abort-on-keypress)
+            abort_on_keypress=1
+            shift
+            ;;
         -h)
             echo "$short_help"
             exit 0
@@ -347,7 +341,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         -f|--file)
             if [[ -n "$file" ]]; then
-                echoerr "Multiple image files are not supported"
+                echo "Multiple image files are not supported" >&2
                 exit 1
             fi
             file="$2"
@@ -363,6 +357,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --noesc)
             noesc=1
+            shift
+            ;;
+        --less-diacritics)
+            less_diacritics=1
             shift
             ;;
         --save-info)
@@ -392,7 +390,7 @@ while [[ $# -gt 0 ]]; do
         --max-rows)
             max_rows="$2"
             if (( max_rows > 255 )); then
-                echoerr "--max-rows cannot be larger than 255 ($2 is specified)"
+                echo "--max-rows cannot be larger than 255 ($2 is specified)" >&2
                 exit 1
             fi
             shift 2
@@ -405,8 +403,8 @@ while [[ $# -gt 0 ]]; do
             rows_per_inch="$2"
             shift 2
             ;;
-        --override-dpi)
-            override_dpi="$2"
+        --override-ppi|--override-dpi)
+            override_ppi="$2"
             shift 2
             ;;
         --last)
@@ -425,38 +423,43 @@ while [[ $# -gt 0 ]]; do
             done
             ;;
         --list|--ls)
-            list_images=1
+            cmd_list_images=1
             ((command_count++))
             shift
             ;;
         --clear-term)
-            clear_term=1
+            cmd_clear_term=1
             ((command_count++))
             shift
             ;;
         --clear-id)
-            clear_id="$2"
+            cmd_clear_id="$2"
             ((command_count++))
             shift 2
             ;;
         --clean-cache)
-            clean_cache=1
+            cmd_clean_cache=1
             ((command_count++))
             shift
             ;;
         --status)
-            show_status=1
+            cmd_show_status=1
             ((command_count++))
             shift
             ;;
         --show-id)
-            show_id="$2"
-            if [[ -z "$show_id" ]]; then
-                echoerr "No id specified"
+            cmd_show_id="$2"
+            if [[ -z "$cmd_show_id" ]]; then
+                echo "No id specified" >&2
                 exit 1
             fi
             ((command_count++))
             shift 2
+            ;;
+        --get-cells-per-inch)
+            cmd_get_cells_per_inch=1
+            ((command_count++))
+            shift
             ;;
 
         # Options used internally.
@@ -474,12 +477,12 @@ while [[ $# -gt 0 ]]; do
             ;;
 
         -*)
-            echoerr "Unknown option: $1"
+            echo "Unknown option: $1" >&2
             exit 1
             ;;
         *)
             if [[ -n "$file" ]]; then
-                echoerr "Multiple image files are not supported: $file and $1"
+                echo "Multiple image files are not supported: $file and $1" >&2
                 exit 1
             fi
             file="$1"
@@ -488,25 +491,129 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+#####################################################################
+# Verify options, compute defaults
+#####################################################################
+
 if (( $command_count > 0 )); then
     if (( $command_count > 1 )); then
-        echoerr "Only one command-like option may be specified"
+        echo "Only one command-like option may be specified" >&2
         exit 1
     fi
     if [[ -n "$file" ]]; then
-        echoerr "File cannot be specified together with a command-like option"
+        echo "File cannot be specified together with a command-like option" >&2
         exit 1
     fi
 fi
 
-if [[ ! "$uploading_method" =~ ^(direct|file|both|auto|)$ ]]; then
-    echoerr "Unknown uploading method: $uploading_method"
+[[ -n "$uploading_method" ]] || uploading_method="auto"
+
+if [[ ! "$uploading_method" =~ ^(direct|file|both|auto)$ ]]; then
+    echo "Unknown uploading method: $uploading_method" >&2
     exit 1
 fi
 
+# If start_x or start_y is specified, make sure that both are set.
+if [[ -n "$start_x" || -n "$start_y" ]]; then
+    [[ -n "$start_x" ]] || start_x=0
+    [[ -n "$start_y" ]] || start_y=0
+fi
+
+# The number of terminal columns starting from the upper left corner. This value
+# is used when displaying the status message so that we take only 1 line.
+max_terminal_cols="$(tput cols)"
+if [[ -n "$start_x" ]]; then
+    max_terminal_cols="$(( "$max_terminal_cols" - "$start_x" + 1 ))"
+fi
+
+# Write max_terminal_cols spaces to `eraser`. It will be used to erase the status line.
+printf -v eraser '%0.s ' $(seq 1 "$max_terminal_cols")
+
+# Compute the maximum number of rows and columns if these values were not
+# specified.
+if [[ -z "$max_cols" ]]; then
+    max_cols="$max_terminal_cols"
+fi
+if [[ -z "$max_rows" ]]; then
+    max_rows="$(tput lines)"
+    if [[ -n "$start_y" ]]; then
+        max_rows="$(( "$max_rows" - "$start_y" + 1 ))"
+    fi
+    if (( max_rows > 255 )); then
+        max_rows=255
+    fi
+fi
+
+if (( "$max_rows" <= 0 )) || (( "$max_cols" <= 0 )); then
+    echo "Max rows ($max_rows) and max cols ($max_cols) cannot be <= 0" >&2
+    exit 1
+fi
+
+#####################################################################
+# Logging, status and error reporting functions
+#####################################################################
+
+# A utility function to print logs
+echolog() {
+    if [[ -n "$log" ]]; then
+        (flock 1; echo "$$ $(date +%s.%3N) $1") >> "$log"
+    fi
+}
+
+# A utility function to display what the script is doing (on tty).
+echostatus() {
+    echolog "$1"
+    if [[ -z "$quiet" ]]; then
+        # Clear the current line
+        if [[ -z "$start_x" ]]; then
+            echo -ne "\r" > "$tty"
+            echo -n "${eraser}" > "$tty"
+            echo -ne "\r" > "$tty"
+        else
+            # If -x/-y are specified, move to the upper left corner first.
+            echo -en "\e[${start_y};${start_x}H" > "$tty"
+            echo -n "${eraser}" > "$tty"
+            echo -en "\e[${start_y};${start_x}H" > "$tty"
+        fi
+        # And display the status. Truncate it if it's too long.
+        echo -n "$1" | colrm "$max_terminal_cols" > "$tty"
+    fi
+}
+
+# Display a message, both as the status and to $err.
+echomessage() {
+    if [[ -z "$err" ]]; then
+        echostatus ""
+        echo "$1" >> /dev/stderr
+        echolog "$1"
+    else
+        echostatus "$1"
+        echo "$1" >> "$err"
+    fi
+}
+
+# Write something to $out.
+echoout() {
+    echo "$1" >> "$out"
+}
+
+# Display an error message, both as the status and to $err, prefixed with
+# "error:".
+echoerr() {
+    echomessage "error: $1"
+}
+
+#####################################################################
+# Some basic initialization
+#####################################################################
+
 echolog ""
 
+echolog "max_cols: $max_cols"
+echolog "max_rows: $max_rows"
+
 [[ -z "$save_info" ]] || > "$save_info"
+[[ -z "$out" ]] || > "$out"
 
 # Store the pid of the current process if requested. This is needed for tmux
 # hijacking so that the original script can wait for the uploading process.
@@ -514,6 +621,20 @@ if [[ -n "$store_pid" ]]; then
     echolog "Storing $$ to $store_pid"
     echo "$$" > "$store_pid"
 fi
+
+check_keypress() {
+    if [[ -n "$abort_on_keypress" ]]; then
+        read_character=""
+        if read -n 1 -t 0.001 read_character < "$tty"; then
+            if [[ -n "$read_character" ]]; then
+                echoerr "Aborted on key press"
+                exit 1
+            fi
+        fi
+    fi
+}
+
+check_keypress
 
 #####################################################################
 # Detecting tmux and figuring out the actual terminal name
@@ -577,7 +698,7 @@ echolog "session_id=$session_id"
 # Choosing the uploading method
 #####################################################################
 
-if [[ "$uploading_method" =~ ^(auto|)$ ]]; then
+if [[ "$uploading_method" =~ ^(auto)$ ]]; then
     if [[ -n "$SSH_CLIENT" || -n "$SSH_TTY" || -n "$SSH_CONNECTION" ]]; then
         echolog "Look like we are in ssh, using direct uploading"
         uploading_method="direct"
@@ -631,6 +752,14 @@ display_image() {
         "\U1d185" "\U1d186" "\U1d187" "\U1d188" "\U1d189" "\U1d1aa" "\U1d1ab"
         "\U1d1ac" "\U1d1ad" "\U1d242" "\U1d243" "\U1d244")
 
+    local row_string=""
+    if [[ -n "$less_diacritics" ]]; then
+        for idx in $(seq 2 "$cols"); do
+            row_string="${row_string}"
+            printf -v row_string "%s\UEEEE" "$row_string"
+        done
+    fi
+
     # Each line starts with the escape sequence to set the foreground color to
     # the image id, unless --noesc is specified.
     line_start=""
@@ -651,21 +780,36 @@ display_image() {
     # Clear the status line.
     echostatus
 
-    # Clear the output file
-    if [[ -z "$append" ]]; then
-        > "$out"
+    # If we are requested to display the image at the given absolute
+    # coordinates, we will use ANSI cursor movement codes, otherwise just append
+    # \n to line_end.
+    if [[ -z "$start_x" ]]; then
+        printf -v line_end '%s\n' "$line_end"
     fi
 
     # Fill the output with characters representing the image
     for y in `seq 0 $(expr $rows - 1)`; do
+        if [[ $((y % 10)) -eq 0 ]]; then
+            check_keypress
+        fi
+        # If we are using absolute positioning, explicitly move the cursor.
+        if [[ -n "$start_x" ]]; then
+            echo -en "\e[$(("$start_y" + "$y"));${start_x}H"
+        fi
         echo -n "$line_start"
-        for x in `seq 0 $(expr $cols - 1)`; do
-            # Note that when $x is out of bounds, the column diacritic will be
-            # empty, meaning that the column should be guessed by the terminal.
-            printf "\UEEEE${rowcolumn_diacritics[$y]}${rowcolumn_diacritics[$x]}"
-        done
-        echo -n "$line_end"
-        printf "\n"
+        if [[ -n "$less_diacritics" ]]; then
+            # In the less diacritics mode specify the row only in the first
+            # cell, and the use just \UEEEE.
+            printf "\UEEEE${rowcolumn_diacritics[$y]}%s" "$row_string"
+        else
+            for x in `seq 0 $(expr $cols - 1)`; do
+                # Note that when $x is out of bounds, the column diacritic will
+                # be empty, meaning that the column should be guessed by the
+                # terminal.
+                printf "\UEEEE${rowcolumn_diacritics[$y]}${rowcolumn_diacritics[$x]}"
+            done
+        fi
+        printf '%s' "$line_end"
     done >> "$out"
 }
 
@@ -752,23 +896,23 @@ fi
 # We will need to disable echo during image uploading, otherwise the response
 # from the terminal containing the image id will get echoed. We will restore the
 # terminal settings on exit unless we get brutally killed.
-stty_orig=`stty -g`
+stty_orig="$(stty -g < "$tty")"
 
 disable_echo() {
-    stty -echo
-    # Disable ctrl-z. Pressing ctrl-z during image uploading may cause some horrible
-    # issues otherwise.
-    stty susp undef
+    stty -echo < "$tty"
+    # Disable ctrl-z. Pressing ctrl-z during image uploading may cause some
+    # horrible issues otherwise.
+    stty susp undef < "$tty"
 }
 
 restore_echo() {
-    stty $stty_orig
+    stty $stty_orig < "$tty"
 }
 
 # Utility to read response from the terminal that we don't need anymore. (If we
 # don't read it it may end up being displayed which is not pretty).
 consume_errors() {
-    while read -r -d '\' -t 0.1 term_response; do
+    while read -r -d '\' -t 0.1 term_response < "$tty"; do
         echolog "Consuming unneeded response: $(sed 's/\x1b/^[/g' <<< "$term_response")"
     done
 }
@@ -792,28 +936,27 @@ trap cleanup EXIT TERM
 # Functions to emit the start and the end of a graphics command.
 if [[ -n "$inside_tmux" ]]; then
     # If we are in tmux we have to wrap the command in Ptmux.
-    start_gr_command() {
-        echo -en '\ePtmux;\e\e_G'
-    }
-    end_gr_command() {
-        echo -en '\e\e\\\e\\'
-    }
+    graphics_command_start='\ePtmux;\e\e_G'
+    graphics_command_end='\e\e\\\e\\'
 else
-    start_gr_command() {
-        echo -en '\e_G'
-    }
-    end_gr_command() {
-        echo -en '\e\\'
-    }
+    graphics_command_start='\e_G'
+    graphics_command_end='\e\\'
 fi
+
+start_gr_command() {
+    echo -en "$graphics_command_start" > "$tty"
+}
+end_gr_command() {
+    echo -en "$graphics_command_end" > "$tty"
+}
 
 # Send a graphics command with the correct start and end
 gr_command() {
     start_gr_command
-    echo -en "$1"
+    echo -en "$1" > "$tty"
     end_gr_command
     if [[ -n "$log" ]]; then
-        local command="$(start_gr_command)$(echo -en "$1")$(end_gr_command)"
+        local command="$(echo -en "${graphics_command_start}$1${graphics_command_end}")"
         echolog "SENDING COMMAND: $(sed 's/\x1b/^[/g' <<< "$command")"
     fi
 }
@@ -834,7 +977,7 @@ get_terminal_response() {
     # -r means backslash is part of the line
     # -d '\' means \ is the line delimiter
     # -t ... is timeout in seconds
-    if ! read -r -d '\' -t "$response_timeout" term_response; then
+    if ! read -s -r -d '\' -t "$response_timeout" term_response < "$tty"; then
         if [[ -z "$term_response" ]]; then
             term_response_printable="No response from terminal"
         else
@@ -851,18 +994,19 @@ get_terminal_response() {
     fi
 }
 
-# Uploads an image to the terminal. If $terminal_dir is specified, acquires the
-# lock and adds the image to the list of images known to be uploaded to the
-# terminal.
-# Usage: upload_image $image_id $file $cols $rows [$terminal_dir]
+# Uploads an image to the terminal. If $terminal_dir and $img_instance are
+# specified, acquires the lock and adds the image to the list of images known to
+# be uploaded to the terminal.
+# Usage: upload_image $image_id $file $cols $rows [$terminal_dir] [$img_instance]
 upload_image() {
     local image_id="$1"
     local file="$2"
     local cols="$3"
     local rows="$4"
     local terminal_dir="$5"
+    local img_instance="$6"
 
-    if [[ -n "$terminal_dir" ]]; then
+    if [[ -n "$terminal_dir" ]] && [[ -n "$img_instance" ]]; then
         (
             flock --timeout "$default_timeout" 9 || \
                 { echoerr "Could not acquire a lock on $terminal_dir.lock"; \
@@ -1047,6 +1191,7 @@ upload_image_impl() {
         echolog "Uploading chunk $chunk"
         chunk_i=$((chunk_i+1))
         if [[ $((chunk_i % 10)) -eq 1 ]]; then
+            check_keypress
             # Check if we are still in the active pane
             if [[ -n "$inside_tmux" ]]; then
                 if ! tmux_is_active_pane; then
@@ -1072,8 +1217,8 @@ upload_image_impl() {
         fi
         # The uploading of the chunk goes here.
         start_gr_command
-        echo -en "i=$image_id,m=1;"
-        cat $chunk
+        echo -en "i=$image_id,m=1;" > "$tty"
+        cat $chunk > "$tty"
         end_gr_command
     done
 
@@ -1177,7 +1322,7 @@ fi
 # Handling the clear-term command
 #####################################################################
 
-if [[ -n "$clear_term" ]]; then
+if [[ -n "$cmd_clear_term" ]]; then
     for terminal_dir in "$terminal_dir_256" "$terminal_dir_24bit"; do
         echomessage "Clearing $terminal_dir"
         (
@@ -1198,17 +1343,17 @@ fi
 # Handling the clear-id command
 #####################################################################
 
-if [[ -n "$clear_id" ]]; then
+if [[ -n "$cmd_clear_id" ]]; then
     for terminal_dir in "$terminal_dir_256" "$terminal_dir_24bit"; do
-        if [[ -e "$terminal_dir/$clear_id" ]]; then
+        if [[ -e "$terminal_dir/$cmd_clear_id" ]]; then
             (
                 flock --timeout "$default_timeout" 9 || \
                     { echoerr "Could not acquire a lock on $terminal_dir.lock"; \
                       exit 1; }
-                rm "$terminal_dir/$clear_id" 2> /dev/null
+                rm "$terminal_dir/$cmd_clear_id" 2> /dev/null
                 # Delete the image (if this command fails, e.g. because of tmux,
                 # we don't care).
-                gr_command "a=d,d=I,i=${clear_id},q=2"
+                gr_command "a=d,d=I,i=${cmd_clear_id},q=2"
                 exit 0
             ) 9>"$terminal_dir.lock" || exit 1
             exit 0
@@ -1221,7 +1366,7 @@ fi
 # Handling the clean-cache command
 #####################################################################
 
-if [[ -n "$clean_cache" ]]; then
+if [[ -n "$cmd_clean_cache" ]]; then
     cleanup_cache
     exit 0
 fi
@@ -1230,7 +1375,7 @@ fi
 # Handling the status command
 #####################################################################
 
-if [[ -n "$show_status" ]]; then
+if [[ -n "$cmd_show_status" ]]; then
     imgs_count="$(ls -1 "$cache_dir/cache" | wc -l)"
     imgs_size_total="$(du -sh "$cache_dir/cache" | cut -f1)"
     echomessage "$imgs_count images ($imgs_size_total) in $cache_dir/cache"
@@ -1259,6 +1404,55 @@ if [[ -n "$show_status" ]]; then
 fi
 
 #####################################################################
+# Handling the get-resolution command
+#####################################################################
+
+# Tries to infer rows_per_inch and cols_per_inch by querying the terminal and
+# reading Xft.dpi
+get_cells_per_inch() {
+    cols_per_inch=""
+    rows_per_inch=""
+    # Query the terminal to get the dimensions of a cell in pixels
+    echolog "Getting cell width and height"
+    if [[ -n "$inside_tmux" ]]; then
+        echo -en '\ePtmux;\e\e[16t\e\\' > "$tty"
+    else
+        echo -en '\e[16t' > "$tty"
+    fi
+    term_response=""
+    if ! read -s -r -d 't' -t "$default_timeout" term_response < "$tty"; then
+        invalid_terminal_response
+        return 1
+    fi
+    local cell_width=""
+    local cell_height=""
+    read -r cell_height cell_width < \
+        <(sed -n 's/.*6;\([0-9]*\);\([0-9]*\)/\1 \2/p' <<< "$term_response")
+    if [[ -z "$cell_height" || -z "$cell_width" ]]; then
+        invalid_terminal_response
+        return 1
+    fi
+    echolog "cell width: $cell_width  cell height: $cell_height"
+
+    # Using Xft.dpi as a sane value for screen resolution.
+    screen_dpi="$(xrdb -query 2> /dev/null | grep 'Xft\.dpi:' | cut -f 2)"
+    echolog "The value of Xft.dpi is $screen_dpi"
+    if [[ -z "$screen_dpi" ]]; then
+        screen_dpi=96
+        echolog "Using 96 as the default screen resolution"
+    fi
+    cols_per_inch="$(bc <<< "scale=2;($screen_dpi)/($cell_width)")"
+    rows_per_inch="$(bc <<< "scale=2;($screen_dpi)/($cell_height)")"
+    echolog "cols per inch: $cols_per_inch  rows per inch: $rows_per_inch"
+}
+
+if [[ -n "$cmd_get_cells_per_inch" ]]; then
+    get_cells_per_inch
+    echo "$cols_per_inch $rows_per_inch $screen_dpi"
+    exit $?
+fi
+
+#####################################################################
 # Handling the reupload command
 #####################################################################
 
@@ -1284,7 +1478,7 @@ reupload_instance() {
         local terminal_dir="$terminal_dir_24bit"
     fi
 
-    upload_image "$id" "$cached_file" "$cols" "$rows" "$terminal_dir"
+    upload_image "$id" "$cached_file" "$cols" "$rows" "$terminal_dir" "$inst"
     return $?
 }
 
@@ -1365,15 +1559,15 @@ fi
 # Handling the show id command
 #####################################################################
 
-if [[ -n "$show_id" ]]; then
+if [[ -n "$cmd_show_id" ]]; then
     # If rows, columns and --no-upload are specified, just display the
     # placeholder.
     if [[ -n "$rows" && -n "$cols" && -n "$no_upload" ]]; then
-        display_image "$show_id" "$cols" "$rows"
+        display_image "$cmd_show_id" "$cols" "$rows"
         exit 0
     fi
 
-    if (( "$show_id" < 256 )); then
+    if (( "$cmd_show_id" < 256 )); then
         use_256="1"
     else
         use_256=""
@@ -1387,22 +1581,27 @@ if [[ -n "$show_id" ]]; then
         terminal_dir="$terminal_dir_24bit"
     fi
 
-    if [[ -z "$force_upload" ]] && [[ -e "$terminal_dir/$show_id" ]]; then
-        instance="$(head -1 "$terminal_dir/$show_id")"
-    else
-        for inst in "$session_dir"/*; do
-            inst_file="$session_dir/$inst"
+    if [[ -z "$force_upload" ]] && [[ -e "$terminal_dir/$cmd_show_id" ]]; then
+        instance="$(head -1 "$terminal_dir/$cmd_show_id")"
+        if [[ -z "$instance" ]]; then
+            echoerr "File $terminal_dir/$cmd_show_id exists but is empty"
+        fi
+    fi
+
+    if [[ -z "$instance" ]]; then
+        for inst_file in "$session_dir"/*; do
             [[ -e "$inst_file" ]] || continue
-            instance="$inst"
+            [[ "$(head -1 "$inst_file")" == "$cmd_show_id" ]] || continue
+            instance="$(basename "$inst_file")"
             if [[ -z "$no_upload" ]]; then
-                reupload_instance "$instance" "$show_id"
+                reupload_instance "$instance" "$cmd_show_id"
             fi
             break
         done
     fi
 
     if [[ -z "$instance" ]]; then
-        echoerr "Could not find image with id $show_id"
+        echoerr "Could not find image with id $cmd_show_id"
         exit 1
     fi
 
@@ -1410,7 +1609,7 @@ if [[ -n "$show_id" ]]; then
     md5="${inst_parts[0]}"
     [[ -n "$cols" ]] || cols="${inst_parts[1]}"
     [[ -n "$rows" ]] || rows="${inst_parts[2]}"
-    display_image "$show_id" "$cols" "$rows"
+    display_image "$cmd_show_id" "$cols" "$rows"
     exit 0
 fi
 
@@ -1418,7 +1617,7 @@ fi
 # Handling the ls command
 #####################################################################
 
-if [[ -n "$list_images" ]]; then
+if [[ -n "$cmd_list_images" ]]; then
     ids_left="$last_n"
     # Iterate over all image instances starting from the newest one.
     for inst_file in $(ls -t "$session_dir_256"/* "$session_dir_24bit"/*); do
@@ -1429,7 +1628,7 @@ if [[ -n "$list_images" ]]; then
             ((ids_left--))
         fi
         if [[ ! -e "$inst_file" ]]; then
-            echomessage "File doesn't exist: $inst_file"
+            echoout "File doesn't exist: $inst_file"
             continue
         fi
         inst="$(basename "$inst_file")"
@@ -1438,14 +1637,15 @@ if [[ -n "$list_images" ]]; then
         im_cols="${inst_parts[1]}"
         im_rows="${inst_parts[2]}"
         id="$(head -1 "$inst_file")"
-        echomessage "id: $id  cols: $im_cols  rows: $im_rows  md5sum: $md5"
+        echoout "id: $id  cols: $im_cols  rows: $im_rows  md5sum: $md5"
         if [[ ! -e "$terminal_dir_256/$id" ]] &&
                 [[ ! -e "$terminal_dir_24bit/$id" ]]; then
-            echomessage "$(tput bold)IMAGE NEEDS REUPLOADING!$(tput sgr0)"
+            echoout "$(tput bold)IMAGE NEEDS REUPLOADING!$(tput sgr0)"
         fi
         [[ -n "$cols" ]] && im_cols="$cols"
         [[ -n "$rows" ]] && im_rows="$rows"
         display_image "$id" "$im_cols" "$im_rows"
+        echoout ""
     done
     exit 0
 fi
@@ -1455,6 +1655,10 @@ fi
 #####################################################################
 
 # Check if the file exists.
+if [[ -z "$file" ]]; then
+    echoerr "File not specified"
+    exit 1
+fi
 if ! [[ -f "$file" ]]; then
     echoerr "File not found: $file (pwd: $(pwd))"
     exit 1
@@ -1468,17 +1672,6 @@ bc_round() {
 }
 
 if [[ -z "$cols" || -z "$rows" ]]; then
-    # Compute the maximum number of rows and columns if these values were not
-    # specified.
-    if [[ -z "$max_cols" ]]; then
-        max_cols="$(tput cols)"
-    fi
-    if [[ -z "$max_rows" ]]; then
-        max_rows="$(tput lines)"
-        if (( max_rows > 255 )); then
-            max_rows=255
-        fi
-    fi
     # Default values of rows per inch and columns per inch.
     [[ -n "$cols_per_inch" ]] || cols_per_inch=12.0
     [[ -n "$rows_per_inch" ]] || rows_per_inch=6.0
@@ -1488,12 +1681,12 @@ if [[ -z "$cols" || -z "$rows" ]]; then
         echoerr "Couldn't get result from identify"
         exit 1
     fi
-    if [[ -n "$override_dpi" ]]; then
-        props[2]="$override_dpi"
-        props[3]="$override_dpi"
+    if [[ -n "$override_ppi" ]]; then
+        props[2]="$override_ppi"
+        props[3]="$override_ppi"
     fi
     echolog "Image pixel width: ${props[0]} pixel height: ${props[1]}"
-    echolog "Image x dpi: ${props[2]} y dpi: ${props[3]}"
+    echolog "Image x ppi: ${props[2]} y ppi: ${props[3]}"
     echolog "Columns per inch: ${cols_per_inch} Rows per inch: ${rows_per_inch}"
     opt_cols_expr="(${props[0]}*${cols_per_inch}/${props[2]})"
     opt_rows_expr="(${props[1]}*${rows_per_inch}/${props[3]})"
@@ -1746,7 +1939,8 @@ if [[ -z "$no_upload" ]]; then
        ! image_needs_reuploading "$image_id" "$cols" "$rows"; then
         echolog "Image already uploaded"
     else
-        upload_image "$image_id" "$cached_file" "$cols" "$rows" "$terminal_dir"
+        upload_image "$image_id" "$cached_file" "$cols" "$rows" \
+            "$terminal_dir" "$img_instance"
     fi
 fi
 
