@@ -188,48 +188,57 @@ function! ShowImageUnderCursor(...) abort
 endfun
 
 function! FindBestPosition(win_width, line_widths, line, cols, rows) abort
+    echom "FindBestPosition win_width " . a:win_width
     let best_column = a:win_width
     let best_offset = 0
+    let best_rows = 0
+    let best_cols = 0
     for offset in range(-a:rows, a:rows)
-        if a:line + offset < 0 || a:line + offset + a:rows > len(a:line_widths)
+        if a:line + offset < 0
             continue
+        endif
+        if a:line + offset >= len(a:line_widths)
+            break
+        endif
+        if offset > 0 && a:line_widths[a:line + offset] >= a:win_width
+            break
         endif
         let column = 0
         for row in range(a:rows)
+            if a:line + offset + row >= len(a:line_widths)
+                break
+            endif
             let column = max([column, a:line_widths[a:line + offset + row]])
+            if column >= a:win_width
+                break
+            endif
+            let available_width = a:win_width - column
+            let newcols = min([available_width, a:cols])
+            let newrows = max([1, a:rows * newcols / a:cols])
+            if newrows > row + 1
+                let newrowsold = newrows
+                let newrows = row + 1
+                let newcols = max([1, newcols * newrows / newrowsold])
+            endif
+            if newrows > best_rows || newcols > best_cols ||
+                        \ (newrows == best_rows && newcols == best_cols &&
+                        \  column + abs(offset + a:rows/2)*3 < best_column + abs(best_offset + a:rows/2)*3)
+                let best_rows = newrows
+                let best_cols = newcols
+                let best_offset = offset
+                let best_column = column
+            endif
         endfor
-        if a:win_width - column >= a:cols && a:win_width - best_column < a:cols
-            let best_column = column
-            let best_offset = offset
-            " if column < best_column || (column == best_column && abs(offset + a:rows/2) < abs(best_offset + a:rows/2))
-        elseif column + abs(offset + a:rows/2) < best_column + abs(best_offset + a:rows/2)
-            let best_column = column
-            let best_offset = offset
-        endif
     endfor
+    echom "found best_rows " . best_rows . " best_cols " . best_cols . " best_column " . best_column
 
     let best_line = a:line + best_offset
 
-    if best_column >= a:win_width
+    if best_column >= a:win_width || best_rows <= 0 || best_cols <= 0
         return []
     endif
 
-    if a:cols <= a:win_width - best_column
-        return [best_line, best_column, a:cols, a:rows]
-    endif
-
-    let newcols = max([1, a:win_width - best_column])
-    let newrows = max([1, a:rows * newcols / a:cols])
-    if newcols < 5 || newrows < 5
-        if newcols*2 < a:cols || newrows*2 < a:rows
-            return []
-        endif
-    endif
-    if newrows < a:rows
-        return FindBestPosition(a:win_width, a:line_widths, a:line, newcols, newrows)
-    else
-        return [best_line, best_column, newcols, newrows]
-    endif
+    return [best_line, best_column, best_cols, best_rows]
 endfun
 
 let g:terminal_images_pending_uploads = []
@@ -292,7 +301,7 @@ function! ShowImagesOnScreen() abort
             continue
         endif
         let line_str = getline(line)
-        call add(line_widths, len(line_str))
+        call add(line_widths, strdisplaywidth(line_str))
 
         if len(match_list) >= 32
             continue
@@ -305,7 +314,8 @@ function! ShowImagesOnScreen() abort
         endfor
     endfor
 
-    let prev_line_widths = get(w:, 'terminal_images_prev_line_width', [])
+    let prev_window_width = get(w:, 'terminal_images_prev_window_width', 0)
+    let prev_line_widths = get(w:, 'terminal_images_prev_line_widths', [])
     let prev_match_list = get(w:, 'terminal_images_prev_match_list', [])
     let prev_finished = get(w:, 'terminal_images_prev_finished', 0)
 
@@ -316,7 +326,9 @@ function! ShowImagesOnScreen() abort
     echom "prev_line_widths " . string(prev_line_widths)
 
     let differ = 0
-    if !prev_finished || len(prev_line_widths) != len(line_widths) || len(prev_match_list) != len(match_list)
+    if !prev_finished || prev_window_width != win_width ||
+                \ len(prev_line_widths) != len(line_widths) ||
+                \ len(prev_match_list) != len(match_list)
         let differ = 1
     else
         for i in range(len(line_widths))
@@ -344,7 +356,8 @@ function! ShowImagesOnScreen() abort
 
     call ClearVisibleImages()
 
-    let w:terminal_images_prev_line_width = copy(line_widths)
+    let w:terminal_images_prev_window_width = win_width
+    let w:terminal_images_prev_line_widths = copy(line_widths)
     let w:terminal_images_prev_match_list = match_list
     let w:terminal_images_prev_finished = 0
 
@@ -365,7 +378,7 @@ function! ShowImagesOnScreen() abort
 
     let prop_type_name = 'TerminalImageMarker_' . string(win_getid()) . '_' . string(bufnr())
     if empty(prop_type_get(prop_type_name))
-        call prop_type_add(prop_type_name, {})
+        call prop_type_add(prop_type_name, {'highlight': 'Constant'})
     endif
 
     for line_and_file in file_list
@@ -398,7 +411,7 @@ function! ShowImagesOnScreen() abort
 
         let cols = str2nr(dims[0])
         let rows = str2nr(dims[1])
-        let best_pos = FindBestPosition(win_width, line_widths, line - line('w0'), cols, rows)
+        let best_pos = FindBestPosition(win_width - 1, line_widths, line - line('w0'), cols, rows)
         if len(best_pos) == 0
             continue
         endif
@@ -406,14 +419,22 @@ function! ShowImagesOnScreen() abort
         let best_column = best_pos[1]
         let best_cols = best_pos[2]
         let best_rows = best_pos[3]
+        if best_cols < 5 || best_rows < 3
+            if best_cols*2 < cols || best_rows*2 < rows
+                continue
+            endif
+        endif
         for line_idx in range(best_rows)
+            if best_pos[0] + line_idx >= len(line_widths)
+                break
+            endif
             let line_widths[best_pos[0] + line_idx] = best_column + best_cols
         endfor
         let b:terminal_images_propid_count =
             \ get(b:, 'terminal_images_propid_count', 0) + 1
         let propid = b:terminal_images_propid_count
         call prop_add(line, 1, #{length: len(getline(line)), type: prop_type_name, id: propid})
-        let popup_id = popup_create( [filename, string(best_pos)],
+        let popup_id = popup_create([filename, string(best_pos)],
                     \ #{line: best_line + line('w0') - line - 1,
                     \   col: best_column - len(getline(line)),
                     \   pos: 'topleft',
@@ -434,7 +455,7 @@ function! ShowImagesOnScreen() abort
 endfun
 
 function! ClearVisibleImages() abort
-    let w:terminal_images_prev_line_width = []
+    let w:terminal_images_prev_line_widths = []
     let w:terminal_images_prev_match_list = []
     let prop_type_name = 'TerminalImageMarker_' . string(win_getid()) . '_' . string(bufnr())
     if !empty(prop_type_get(prop_type_name))
@@ -444,7 +465,7 @@ endfun
 
 
 function! CloseObscuringImages() abort
-    let w:terminal_images_prev_line_width = []
+    let w:terminal_images_prev_line_widths = []
     let w:terminal_images_prev_match_list = []
     let prop_type_name = 'TerminalImageMarker_' . string(win_getid()) . '_' . string(bufnr())
     for popup_id in popup_list()
