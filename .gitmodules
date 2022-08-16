@@ -1,0 +1,3 @@
+[submodule "tupimage"]
+	path = tupimage
+	url = https://github.com/sergei-grechanik/tupimage

@@ -29,8 +29,7 @@ let g:terminal_images_max_rows = get(g:, 'terminal_images_max_rows', 30)
 
 if !exists('g:terminal_images_command')
     let g:terminal_images_command =
-                \ (executable('tupimage') ?
-                \  'tupimage' : (s:path . "/../tupimage-bundled.sh"))
+                \ s:path . "/../tupimage/tupimage"
                 " \ . " --less-diacritics"
 endif
 
