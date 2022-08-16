@@ -37,19 +37,29 @@ if !exists('g:terminal_images_regex')
     let g:terminal_images_regex = '\c\([a-z0-9_+=/$%-]\+\.\(png\|jpe\?g\|gif\)\)'
 endif
 
+if !exists('g:terminal_images_enabled')
+    let g:terminal_images_enabled = 1
+endif
+
 let g:terminal_images_pending_uploads = []
 let g:terminal_images_cache = {}
+
 
 " Show image under cursor in a popup window
 command TerminalImagesShowUnderCursor :call terminal_images#ShowImageUnderCursor()
 " Same thing but do not show error messages if the file is not found
 command ShowImageUnderCursorIfReadable :call terminal_images#ShowImageUnderCursor(1)
 
-command TerminalImagesCloseObscuring :call terminal_images#CloseObscuringImages()
+command TerminalImagesToggle :call terminal_images#ToggleGlobal()
+command TerminalImagesEnable :call terminal_images#EnableGlobal()
+command TerminalImagesDisable :call terminal_images#DisableGlobal()
 command TerminalImagesShowAll :call terminal_images#ShowAllImages()
+command TerminalImagesUploadPending :call terminal_images#UploadPendingImages()
+command TerminalImagesClear :call terminal_images#ClearVisibleImages()
+command TerminalImagesCloseObscuring :call terminal_images#CloseObscuringImages()
 
 augroup TerminalImagesAugroup
     autocmd!
-    autocmd WinLeave,VimResized * :TerminalImagesCloseObscuring
-    autocmd CursorHold * :TerminalImagesShowAll
+    autocmd WinLeave,VimResized * :call terminal_images#CloseObscuringMaybe()
+    autocmd CursorHold * :call terminal_images#ShowAllMaybe()
 augroup end

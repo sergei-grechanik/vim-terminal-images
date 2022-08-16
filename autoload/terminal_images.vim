@@ -144,7 +144,6 @@ function! terminal_images#ShowImageUnderCursor(...) abort
 endfun
 
 function! s:FindBestPosition(win_width, line_widths, line, cols, rows) abort
-    echom "s:FindBestPosition win_width " . a:win_width
     let best_column = a:win_width
     let best_offset = 0
     let best_rows = 0
@@ -186,7 +185,6 @@ function! s:FindBestPosition(win_width, line_widths, line, cols, rows) abort
             endif
         endfor
     endfor
-    echom "found best_rows " . best_rows . " best_cols " . best_cols . " best_column " . best_column
 
     let best_line = a:line + best_offset
 
@@ -264,7 +262,6 @@ function! terminal_images#ShowAllImages() abort
         call substitute(line_str, g:terminal_images_regex, '\=add(matches, submatch(1))', 'g')
         for m in matches
             call add(match_list, [line, m])
-            echom "Found " . m . " with line width " . strdisplaywidth(line_str) . " or " . strlen(line_str)
         endfor
     endfor
 
@@ -272,12 +269,6 @@ function! terminal_images#ShowAllImages() abort
     let prev_line_widths = get(w:, 'terminal_images_prev_line_widths', [])
     let prev_match_list = get(w:, 'terminal_images_prev_match_list', [])
     let prev_finished = get(w:, 'terminal_images_prev_finished', 0)
-
-    echom "prev_finished " . prev_finished
-    echom "match_list " . string(match_list)
-    echom "prev_match_list " . string(prev_match_list)
-    echom "line_widths " . string(line_widths)
-    echom "prev_line_widths " . string(prev_line_widths)
 
     let differ = 0
     if !prev_finished || prev_window_width != win_width ||
@@ -300,13 +291,10 @@ function! terminal_images#ShowAllImages() abort
     endif
 
     if !differ
-        echom "Not Differ"
         let w:terminal_images_prev_finished = 1
         call terminal_images#UploadPendingImages()
         return
     endif
-
-    echom "Differ"
 
     call terminal_images#ClearVisibleImages()
 
@@ -401,7 +389,6 @@ function! terminal_images#ShowAllImages() abort
                     \   minheight: best_rows, minwidth: best_cols,
                     \   maxheight: best_rows, maxwidth: best_cols})
         call add(g:terminal_images_pending_uploads, [popup_id, filename, best_cols, best_rows])
-        echom "Window " . filename . " line " . string(best_line + line('w0') - line - 1) . " col " . string(best_column - len(getline(line)))
     endfor
 
     let w:terminal_images_prev_finished = 1
@@ -447,4 +434,34 @@ function! terminal_images#CloseObscuringImages() abort
             endif
         endif
     endfor
+endfun
+
+function! terminal_images#ShowAllMaybe() abort
+    if g:terminal_images_enabled
+        call terminal_images#ShowAllImages()
+    endif
+endfun
+
+function! terminal_images#CloseObscuringMaybe() abort
+    if g:terminal_images_enabled
+        call terminal_images#CloseObscuringImages()
+    endif
+endfun
+
+function! terminal_images#EnableGlobal() abort
+    let g:terminal_images_enabled = 1
+    call terminal_images#ShowAllImages()
+endfun
+
+function! terminal_images#DisableGlobal() abort
+    let g:terminal_images_enabled = 0
+    call terminal_images#ClearVisibleImages()
+endfun
+
+function! terminal_images#ToggleGlobal() abort
+    if g:terminal_images_enabled
+        call terminal_images#DisableGlobal()
+    else
+        call terminal_images#EnableGlobal()
+    endif
 endfun
