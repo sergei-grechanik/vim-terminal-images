@@ -332,7 +332,7 @@ function! terminal_images#ShowAllImages() abort
 
     let prop_type_name = 'TerminalImageMarker_' . string(win_getid()) . '_' . string(bufnr())
     if empty(prop_type_get(prop_type_name))
-        call prop_type_add(prop_type_name, {'highlight': 'Constant'})
+        call prop_type_add(prop_type_name, {})
     endif
 
     for line_and_file in file_list
