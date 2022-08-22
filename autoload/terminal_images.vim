@@ -6,28 +6,38 @@ function! s:GetWindowWidth() abort
     return winwidth(0) - &numberwidth - &foldcolumn - (len(signlist) > 2 ? 2 : 0)
 endfun
 
+" Get the value of a buffer variable, or a global variable if the buffer
+" variable is missing.
+function! s:Get(name) abort
+    return get(b:, a:name, get(g:, a:name))
+endfun
+
 " Upload the given image with the given size. If `cols` and `rows` are zero, the
-" best size will be computed automatically. The image will be fit to width or
-" height and centered.
+" best size will be computed automatically.
 " The result of this function is a list of lines with text properties
 " representing the image (can be used with popup_create and popup_settext).
-function! terminal_images#UploadTerminalImage(filename, cols, rows)
+function! terminal_images#UploadTerminalImage(filename, params) abort
+    let cols = get(a:params, 'cols', 0)
+    let rows = get(a:params, 'rows', 0)
+    let flags = get(a:params, 'flags', '')
     " If the number of columns and rows is not provided, the script will compute
     " them automatically. We just need to limit the number of columns and rows
     " so that the image fits in the window.
-    let maxcols = min([g:terminal_images_max_columns, &columns, s:GetWindowWidth() - 2])
-    let maxrows = min([g:terminal_images_max_rows, &lines, winheight(0) - 2])
+    let maxcols = s:Get('terminal_images_max_columns')
+    let maxrows = s:Get('terminal_images_max_rows')
+    let maxcols = min([maxcols, &columns, s:GetWindowWidth() - 2])
+    let maxrows = min([maxrows, &lines, winheight(0) - 2])
     let maxcols = max([1, maxcols])
     let maxrows = max([1, maxrows])
-    let cols_str = a:cols ? " -c " . shellescape(string(a:cols)) : ""
-    let rows_str = a:rows ? " -r " . shellescape(string(a:rows)) : ""
+    let cols_str = cols ? " -c " . shellescape(string(cols)) : ""
+    let rows_str = rows ? " -r " . shellescape(string(rows)) : ""
     let filename_expanded = resolve(expand(a:filename))
     let filename_str = shellescape(filename_expanded)
     let outfile = tempname()
     let errfile = tempname()
     let infofile = tempname()
 
-    " We use a script to upload the file. We ask it to write lines
+    " We use tupimage to upload the file. We ask it to write lines
     " representing the image to `outfile` and disable outputting escape codes
     " for the image id (--noesc) because we assign them by ourselves using text
     " properties.
@@ -41,8 +51,8 @@ function! terminal_images#UploadTerminalImage(filename, cols, rows)
                 \ " --save-info " . shellescape(infofile) .
                 \ " --noesc " .
                 \ " --256 " .
-                \ " " . filename_str .
-                \ " < /dev/tty > /dev/tty"
+                \ flags .
+                \ " " . filename_str
     call system(command)
     if v:shell_error != 0
         if filereadable(errfile)
@@ -56,6 +66,7 @@ function! terminal_images#UploadTerminalImage(filename, cols, rows)
     " Get image id from infofile.
     let id = ''
     for infoline in readfile(infofile)
+        " The line we want looks something like "id 1234"
         let id = matchstr(infoline, '^id[ \t]\+\zs[0-9]\+\ze$')
         if id != ''
             break
@@ -83,22 +94,32 @@ function! terminal_images#UploadTerminalImage(filename, cols, rows)
     return result
 endfun
 
-" Find a readable file named `filename` in some plausible directories. Display
-" an error message if a file could not be found.
+" Find a readable file named `filename` in some plausible directories. Throw an
+" exception if a file could not be found.
 function! terminal_images#FindReadableFile(filename) abort
+    " Try the current directory and the directory of the current file.
     let filenames = [a:filename, expand('%:p:h') . "/" . a:filename]
+    " Try the current netrw directory.
     if exists('b:netrw_curdir')
         call add(filenames, b:netrw_curdir . "/" . a:filename)
-    endif
-    let globlist = glob(expand('%:p:h') . "/**/" . a:filename, 0, 1)
-    if len(globlist) == 1
-        call extend(filenames, globlist)
     endif
     for filename in filenames
         if filereadable(filename)
             return filename
         endif
     endfor
+
+    " In subdirectories of the directory of the current file (descend one level
+    " by default).
+    let globpattern = expand('%:p:h') .
+                \ "/" . s:Get('terminal_images_subdir_glob') . "/" . a:filename
+    let globlist = glob(globpattern, 0, 1)
+    for filename in globlist
+        if filereadable(filename)
+            return filename
+        endif
+    endfor
+
     throw "File(s) not readable: " . string(filenames)
 endfun
 
@@ -122,7 +143,7 @@ function! terminal_images#ShowImageUnderCursor(...) abort
     redraw
     echo "Uploading " . filename
     try
-        let text = terminal_images#UploadTerminalImage(filename, 0, 0)
+        let text = terminal_images#UploadTerminalImage(filename, {})
         redraw
         echo "Showing " . filename
     catch
@@ -207,7 +228,15 @@ function! s:GetCacheRecord(filename) abort
     return g:terminal_images_cache[a:filename]
 endfun
 
-function! terminal_images#UploadPendingImages() abort
+function! terminal_images#UploadPendingImages(params) abort
+    let reupload = get(a:params, 'reupload', 0)
+    let flags = ""
+    if reupload
+        let flags = " --force-upload "
+    else
+        let flags = " --one-way "
+    endif
+
     while len(g:terminal_images_pending_uploads) > 0
         let upload = remove(g:terminal_images_pending_uploads,
                     \ len(g:terminal_images_pending_uploads) - 1)
@@ -224,7 +253,8 @@ function! terminal_images#UploadPendingImages() abort
             echom "Uploading " . filename " (" . cols . "x" . rows . ")"
             let text = ["failed", filename]
             try
-                let text = terminal_images#UploadTerminalImage(filename, cols, rows)
+                let text = terminal_images#UploadTerminalImage(filename,
+                            \{'cols': cols, 'rows': rows, 'flags': flags})
                 let cache_record.cols = cols
                 let cache_record.rows = rows
                 let cache_record.text = text
@@ -237,10 +267,12 @@ function! terminal_images#UploadPendingImages() abort
     endwhile
 endfun
 
-function! terminal_images#ShowAllImages() abort
+function! terminal_images#ShowAllImages(params) abort
     let win_width = s:GetWindowWidth()
-    let maxcols = min([g:terminal_images_max_columns, &columns, win_width - 2])
-    let maxrows = min([g:terminal_images_max_rows, &lines, winheight(0) - 2])
+    let maxcols = s:Get('terminal_images_max_columns')
+    let maxrows = s:Get('terminal_images_max_rows')
+    let maxcols = min([maxcols, &columns, win_width - 2])
+    let maxrows = min([maxrows, &lines, winheight(0) - 2])
     let maxcols = max([1, maxcols])
     let maxrows = max([1, maxrows])
 
@@ -259,7 +291,7 @@ function! terminal_images#ShowAllImages() abort
         endif
 
         let matches = []
-        call substitute(line_str, g:terminal_images_regex, '\=add(matches, submatch(1))', 'g')
+        call substitute(line_str, s:Get('terminal_images_regex'), '\=add(matches, submatch(1))', 'g')
         for m in matches
             call add(match_list, [line, m])
         endfor
@@ -292,7 +324,7 @@ function! terminal_images#ShowAllImages() abort
 
     if !differ
         let w:terminal_images_prev_finished = 1
-        call terminal_images#UploadPendingImages()
+        call terminal_images#UploadPendingImages(a:params)
         return
     endif
 
@@ -393,7 +425,15 @@ function! terminal_images#ShowAllImages() abort
 
     let w:terminal_images_prev_finished = 1
 
-    call terminal_images#UploadPendingImages()
+    call terminal_images#UploadPendingImages(a:params)
+endfun
+
+function! terminal_images#ShowAllImagesForceReupload() abort
+    let g:terminal_images_cache = {}
+    let g:terminal_images_pending_uploads = []
+    let w:terminal_images_prev_line_widths = []
+    let w:terminal_images_prev_match_list = []
+    call terminal_images#ShowAllImages({'reupload': 1})
 endfun
 
 function! terminal_images#ClearVisibleImages() abort
@@ -438,7 +478,7 @@ endfun
 
 function! terminal_images#ShowAllMaybe() abort
     if g:terminal_images_enabled
-        call terminal_images#ShowAllImages()
+        call terminal_images#ShowAllImages({})
     endif
 endfun
 
@@ -450,12 +490,14 @@ endfun
 
 function! terminal_images#EnableGlobal() abort
     let g:terminal_images_enabled = 1
-    call terminal_images#ShowAllImages()
+    call terminal_images#ShowAllImages({})
+    echom "Automatic image display is on"
 endfun
 
 function! terminal_images#DisableGlobal() abort
     let g:terminal_images_enabled = 0
     call terminal_images#ClearVisibleImages()
+    echom "Automatic image display is off"
 endfun
 
 function! terminal_images#ToggleGlobal() abort

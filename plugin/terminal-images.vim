@@ -22,17 +22,24 @@ for i in range(1, 255)
     call prop_type_add(prop_name, {'highlight': higroup_name})
 endfor
 
-let s:path = fnamemodify(resolve(expand('<sfile>:p')), ':h')
-
+" The maximum width and height of an image window, in cells.
 let g:terminal_images_max_columns = get(g:, 'terminal_images_max_columns', 100)
 let g:terminal_images_max_rows = get(g:, 'terminal_images_max_rows', 30)
 
+let s:path = fnamemodify(resolve(expand('<sfile>:p')), ':h')
+
+" The name or path of the tupimage command and default options.
 if !exists('g:terminal_images_command')
     let g:terminal_images_command =
                 \ s:path . "/../tupimage/tupimage"
                 " \ . " --less-diacritics"
 endif
 
+if !exists('g:terminal_images_subdir_glob')
+    let g:terminal_images_subdir_glob = '*'
+endif
+
+" A regexp matching image file names. May be overridden by the buffer variable.
 if !exists('g:terminal_images_regex')
     let g:terminal_images_regex = '\c\([a-z0-9_+=/$%-]\+\.\(png\|jpe\?g\|gif\)\)'
 endif
@@ -50,16 +57,24 @@ command TerminalImagesShowUnderCursor :call terminal_images#ShowImageUnderCursor
 " Same thing but do not show error messages if the file is not found
 command ShowImageUnderCursorIfReadable :call terminal_images#ShowImageUnderCursor(1)
 
+" Enable/Disable/Toggle automatic image display on cursor hold.
 command TerminalImagesToggle :call terminal_images#ToggleGlobal()
 command TerminalImagesEnable :call terminal_images#EnableGlobal()
 command TerminalImagesDisable :call terminal_images#DisableGlobal()
-command TerminalImagesShowAll :call terminal_images#ShowAllImages()
-command TerminalImagesUploadPending :call terminal_images#UploadPendingImages()
-command TerminalImagesClear :call terminal_images#ClearVisibleImages()
+" Show all images found in the current window.
+command TerminalImagesShowAll :call terminal_images#ShowAllImages({})
+" Show all images and force reuploading all of them. Useful when you think that
+" some of the images are broken.
+command TerminalImagesShowAllForceReupload :call terminal_images#ShowAllImagesForceReupload()
+" Clear all images in the current window.
+command TerminalImagesClear :call terminal_images#ClearVisibleImages() | redraw!
+" Upload images that are pending upload.
+command TerminalImagesUploadPending :call terminal_images#UploadPendingImages({})
+" Close images that may obscure other windows.
 command TerminalImagesCloseObscuring :call terminal_images#CloseObscuringImages()
 
 augroup TerminalImagesAugroup
     autocmd!
-    autocmd WinLeave,VimResized * :call terminal_images#CloseObscuringMaybe()
+    autocmd WinLeave,VimResized * :call terminal_images#CloseObscuringImages()
     autocmd CursorHold * :call terminal_images#ShowAllMaybe()
 augroup end
