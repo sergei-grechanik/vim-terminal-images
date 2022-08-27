@@ -139,7 +139,7 @@ function! terminal_images#ShowImageUnderCursor(...) abort
     if !filereadable(filename)
         return
     endif
-    let uploading_message = popup_atcursor("Uploading " . filename, {})
+    " let uploading_message = popup_atcursor("Uploading " . filename, {})
     redraw
     echo "Uploading " . filename
     try
@@ -147,7 +147,7 @@ function! terminal_images#ShowImageUnderCursor(...) abort
         redraw
         echo "Showing " . filename
     catch
-        call popup_close(uploading_message)
+        " call popup_close(uploading_message)
         " Vim doesn't want to redraw unless I put echo in between
         redraw!
         echo
@@ -157,11 +157,11 @@ function! terminal_images#ShowImageUnderCursor(...) abort
         echohl None
         return
     endtry
-    call popup_close(uploading_message)
+    " call popup_close(uploading_message)
     let background_higroup =
                 \ get(b:, 'terminal_images_background', 'TerminalImagesBackground')
     return popup_atcursor(text,
-                \ #{wrap: 0, highlight: background_higroup})
+                \ #{wrap: 0, highlight: background_higroup, zindex: 1000})
 endfun
 
 function! s:FindBestPosition(win_width, line_widths, line, cols, rows) abort
@@ -368,6 +368,7 @@ function! terminal_images#ShowAllImages(params) abort
             let command = g:terminal_images_command .
                         \ " --max-cols " . string(maxcols) .
                         \ " --max-rows " . string(maxrows) .
+                        \ " --quiet " .
                         \ " -e /dev/null " .
                         \ " --only-dump-dims " .
                         \ filename_esc
@@ -408,6 +409,8 @@ function! terminal_images#ShowAllImages(params) abort
             \ get(b:, 'terminal_images_propid_count', 0) + 1
         let propid = b:terminal_images_propid_count
         call prop_add(line, 1, #{length: len(getline(line)), type: prop_type_name, id: propid})
+        let background_higroup =
+            \ get(b:, 'terminal_images_background', 'TerminalImagesBackground')
         let popup_id = popup_create([filename, string(best_pos)],
                     \ #{line: best_line + line('w0') - line - 1,
                     \   col: best_column - strdisplaywidth(getline(line)),
@@ -416,6 +419,7 @@ function! terminal_images#ShowAllImages(params) abort
                     \   fixed: 1,
                     \   flip: 0,
                     \   wrap: 1,
+                    \   highlight: background_higroup,
                     \   textprop: prop_type_name,
                     \   textpropid: propid,
                     \   minheight: best_rows, minwidth: best_cols,
@@ -477,31 +481,31 @@ function! terminal_images#CloseObscuringImages() abort
 endfun
 
 function! terminal_images#ShowAllMaybe() abort
-    if g:terminal_images_enabled
+    if g:terminal_images_auto
         call terminal_images#ShowAllImages({})
     endif
 endfun
 
 function! terminal_images#CloseObscuringMaybe() abort
-    if g:terminal_images_enabled
+    if g:terminal_images_auto
         call terminal_images#CloseObscuringImages()
     endif
 endfun
 
 function! terminal_images#EnableGlobal() abort
-    let g:terminal_images_enabled = 1
+    let g:terminal_images_auto = 1
     call terminal_images#ShowAllImages({})
     echom "Automatic image display is on"
 endfun
 
 function! terminal_images#DisableGlobal() abort
-    let g:terminal_images_enabled = 0
+    let g:terminal_images_auto = 0
     call terminal_images#ClearVisibleImages()
     echom "Automatic image display is off"
 endfun
 
 function! terminal_images#ToggleGlobal() abort
-    if g:terminal_images_enabled
+    if g:terminal_images_auto
         call terminal_images#DisableGlobal()
     else
         call terminal_images#EnableGlobal()

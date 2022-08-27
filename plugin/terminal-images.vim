@@ -44,8 +44,8 @@ if !exists('g:terminal_images_regex')
     let g:terminal_images_regex = '\c\([a-z0-9_+=/$%-]\+\.\(png\|jpe\?g\|gif\)\)'
 endif
 
-if !exists('g:terminal_images_enabled')
-    let g:terminal_images_enabled = 1
+if !exists('g:terminal_images_auto')
+    let g:terminal_images_auto = 1
 endif
 
 let g:terminal_images_pending_uploads = []
@@ -55,7 +55,7 @@ let g:terminal_images_cache = {}
 " Show image under cursor in a popup window
 command TerminalImagesShowUnderCursor :call terminal_images#ShowImageUnderCursor()
 " Same thing but do not show error messages if the file is not found
-command ShowImageUnderCursorIfReadable :call terminal_images#ShowImageUnderCursor(1)
+command TerminalImagesShowUnderCursorIfReadable :call terminal_images#ShowImageUnderCursor(1)
 
 " Enable/Disable/Toggle automatic image display on cursor hold.
 command TerminalImagesToggle :call terminal_images#ToggleGlobal()
