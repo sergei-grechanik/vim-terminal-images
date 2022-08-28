@@ -29,6 +29,8 @@ function! terminal_images#UploadTerminalImage(filename, params) abort
     let maxrows = min([maxrows, &lines, winheight(0) - 2])
     let maxcols = max([1, maxcols])
     let maxrows = max([1, maxrows])
+    let maxcols_str = cols ? "" : " --max-cols " . string(maxcols)
+    let maxrows_str = rows ? "" : " --max-rows " . string(maxrows)
     let cols_str = cols ? " -c " . shellescape(string(cols)) : ""
     let rows_str = rows ? " -r " . shellescape(string(rows)) : ""
     let filename_expanded = resolve(expand(a:filename))
@@ -44,8 +46,8 @@ function! terminal_images#UploadTerminalImage(filename, params) abort
     let command = g:terminal_images_command .
                 \ cols_str .
                 \ rows_str .
-                \ " --max-cols " . string(maxcols) .
-                \ " --max-rows " . string(maxrows) .
+                \ maxcols_str .
+                \ maxrows_str .
                 \ " -e " . shellescape(errfile) .
                 \ " -o " . shellescape(outfile) .
                 \ " --save-info " . shellescape(infofile) .
@@ -139,7 +141,10 @@ function! terminal_images#ShowImageUnderCursor(...) abort
     if !filereadable(filename)
         return
     endif
-    " let uploading_message = popup_atcursor("Uploading " . filename, {})
+    if !silent
+        let uploading_message =
+                    \ popup_atcursor("Uploading " . filename, {'zindex': 1010})
+    endif
     redraw
     echo "Uploading " . filename
     try
@@ -147,7 +152,9 @@ function! terminal_images#ShowImageUnderCursor(...) abort
         redraw
         echo "Showing " . filename
     catch
-        " call popup_close(uploading_message)
+        if !silent
+            call popup_close(uploading_message)
+        endif
         " Vim doesn't want to redraw unless I put echo in between
         redraw!
         echo
@@ -157,7 +164,9 @@ function! terminal_images#ShowImageUnderCursor(...) abort
         echohl None
         return
     endtry
-    " call popup_close(uploading_message)
+    if !silent
+        call popup_close(uploading_message)
+    endif
     let background_higroup =
                 \ get(b:, 'terminal_images_background', 'TerminalImagesBackground')
     return popup_atcursor(text,
@@ -237,6 +246,9 @@ function! terminal_images#UploadPendingImages(params) abort
         let flags = " --one-way "
     endif
 
+    let uploading_message =
+                \ popup_atcursor("Uploading images", {'zindex': 1010})
+
     while len(g:terminal_images_pending_uploads) > 0
         let upload = remove(g:terminal_images_pending_uploads,
                     \ len(g:terminal_images_pending_uploads) - 1)
@@ -251,10 +263,17 @@ function! terminal_images#UploadPendingImages(params) abort
             let text = cache_record.text
         else
             echom "Uploading " . filename " (" . cols . "x" . rows . ")"
+            call popup_settext(uploading_message, "Uploading " . filename)
+            redraw
             let text = ["failed", filename]
             try
+                let pos = popup_getpos(popup_id)
+                let abs_pos_flags =
+                            \ " -x " . pos.core_col . " -y " . pos.core_line .
+                            \ " --max-terminal-cols " . pos.core_width . " "
                 let text = terminal_images#UploadTerminalImage(filename,
-                            \{'cols': cols, 'rows': rows, 'flags': flags})
+                            \{'cols': cols, 'rows': rows,
+                            \ 'flags': flags . abs_pos_flags})
                 let cache_record.cols = cols
                 let cache_record.rows = rows
                 let cache_record.text = text
@@ -265,6 +284,7 @@ function! terminal_images#UploadPendingImages(params) abort
         call popup_settext(popup_id, text)
         redraw
     endwhile
+    call popup_close(uploading_message)
 endfun
 
 function! terminal_images#ShowAllImages(params) abort
