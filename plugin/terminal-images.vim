@@ -48,6 +48,10 @@ if !exists('g:terminal_images_auto')
     let g:terminal_images_auto = 1
 endif
 
+if !exists('g:terminal_images_auto_show_current')
+    let g:terminal_images_auto_show_current = 1
+endif
+
 let g:terminal_images_pending_uploads = []
 let g:terminal_images_cache = {}
 
@@ -61,6 +65,8 @@ command TerminalImagesShowUnderCursorIfReadable :call terminal_images#ShowImageU
 command TerminalImagesToggle :call terminal_images#ToggleGlobal()
 command TerminalImagesEnable :call terminal_images#EnableGlobal()
 command TerminalImagesDisable :call terminal_images#DisableGlobal()
+" Show the current buffer if it's an image.
+command TerminalImagesShowCurrent :call terminal_images#ShowCurrentFile({})
 " Show all images found in the current window.
 command TerminalImagesShowAll :call terminal_images#ShowAllImages({})
 " Show all images and force reuploading all of them. Useful when you think that
@@ -77,4 +83,5 @@ augroup TerminalImagesAugroup
     autocmd!
     autocmd WinLeave,VimResized * :call terminal_images#CloseObscuringImages()
     autocmd CursorHold * :call terminal_images#ShowAllMaybe()
+    autocmd BufWinEnter * :call terminal_images#ShowCurrentMaybe()
 augroup end

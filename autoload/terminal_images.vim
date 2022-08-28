@@ -48,19 +48,19 @@ function! terminal_images#UploadTerminalImage(filename, params) abort
                 \ rows_str .
                 \ maxcols_str .
                 \ maxrows_str .
-                \ " -e " . shellescape(errfile) .
                 \ " -o " . shellescape(outfile) .
                 \ " --save-info " . shellescape(infofile) .
                 \ " --noesc " .
                 \ " --256 " .
                 \ flags .
-                \ " " . filename_str
+                \ " " . filename_str .
+                \ " 2> " . shellescape(errfile)
     call system(command)
     if v:shell_error != 0
         if filereadable(errfile)
             let err_message = readfile(errfile)[0]
             call delete(errfile)
-            throw "Uploading error: " . err_message
+            throw "Error: " . err_message . "  Command: " . command
         endif
         throw "Command failed: " . command
     endif
@@ -287,6 +287,65 @@ function! terminal_images#UploadPendingImages(params) abort
     call popup_close(uploading_message)
 endfun
 
+function! terminal_images#ShowCurrentFile(params) abort
+    let filename = expand('%:p')
+    if empty(filename) || !filereadable(filename)
+        return
+    endif
+
+    let win_width = s:GetWindowWidth()
+    let maxcols = win_width - 2
+    let maxrows = winheight(0) - 2
+    if maxcols < 1 || maxrows < 1
+        return
+    endif
+
+    let filename_esc = shellescape(filename)
+    let command = g:terminal_images_command .
+                \ " --max-cols " . string(maxcols) .
+                \ " --max-rows " . string(maxrows) .
+                \ " --quiet " .
+                \ " -e /dev/null " .
+                \ " --only-dump-dims " .
+                \ filename_esc
+    let dims = split(system(command), " ")
+    if v:shell_error != 0 || len(dims) != 2
+        return
+    endif
+
+    let best_cols = str2nr(dims[0])
+    let best_rows = str2nr(dims[1])
+
+    let prop_type_name = 'TerminalImageMarker_' . string(win_getid()) . '_' . string(bufnr())
+    if empty(prop_type_get(prop_type_name))
+        call prop_type_add(prop_type_name, {})
+    endif
+
+    let b:terminal_images_propid_count =
+        \ get(b:, 'terminal_images_propid_count', 0) + 1
+    let propid = b:terminal_images_propid_count
+    call prop_add(line('w0'), 1, #{length: 0, type: prop_type_name, id: propid})
+
+    let background_higroup =
+        \ get(b:, 'terminal_images_background', 'TerminalImagesBackground')
+    let popup_id = popup_create([filename],
+                \ #{line: 0,
+                \   col: 0,
+                \   pos: 'topleft',
+                \   close: 'click',
+                \   fixed: 1,
+                \   flip: 0,
+                \   wrap: 1,
+                \   highlight: background_higroup,
+                \   textprop: prop_type_name,
+                \   textpropid: propid,
+                \   minheight: best_rows, minwidth: best_cols,
+                \   maxheight: best_rows, maxwidth: best_cols})
+    call add(g:terminal_images_pending_uploads, [popup_id, filename, best_cols, best_rows])
+
+    call terminal_images#UploadPendingImages(a:params)
+endfun
+
 function! terminal_images#ShowAllImages(params) abort
     let win_width = s:GetWindowWidth()
     let maxcols = s:Get('terminal_images_max_columns')
@@ -369,6 +428,15 @@ function! terminal_images#ShowAllImages(params) abort
         endtry
         call add(file_list, [line, filename])
     endfor
+
+    " If there is nothing to show, try to show the current file.
+    if empty(file_list)
+        let w:terminal_images_prev_finished = 1
+        if g:terminal_images_auto_show_current
+            call terminal_images#ShowCurrentFile(a:params)
+        endif
+        return
+    endif
 
     let prop_type_name = 'TerminalImageMarker_' . string(win_getid()) . '_' . string(bufnr())
     if empty(prop_type_get(prop_type_name))
@@ -503,6 +571,14 @@ endfun
 function! terminal_images#ShowAllMaybe() abort
     if g:terminal_images_auto
         call terminal_images#ShowAllImages({})
+    elseif g:terminal_images_auto_show_current
+        call terminal_images#ShowCurrentFile({})
+    endif
+endfun
+
+function! terminal_images#ShowCurrentMaybe() abort
+    if g:terminal_images_auto_show_current
+        call terminal_images#ShowCurrentFile({})
     endif
 endfun
 

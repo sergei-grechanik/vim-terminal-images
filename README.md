@@ -44,6 +44,13 @@ To hide images in the current buffer use `:TerminalImagesClear`. If you think
 some of the images failed to upload correctly, use
 `:TerminalImagesShowAllForceReupload`.
 
+### Preview the current file
+
+By default, on `BufWinEnter` the plugin will check if the current file is an
+image file, and will display it in a floating window. This can be disabled
+separately:
+
+    let g:terminal_images_auto_show_current = 0
 
 ## Configuration
 
@@ -55,6 +62,8 @@ some of the images failed to upload correctly, use
 
     let g:terminal_images_max_columns = 100
     let g:terminal_images_max_rows = 30
+
+Doesn't influence the size of the current file preview.
 
 ### Upload command
 
