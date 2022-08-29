@@ -10,6 +10,8 @@ which are currently:
 Very experimental.
 Doesn't support nvim (yet).
 
+![screenshot](https://user-images.githubusercontent.com/1084979/187103012-0e71333a-2c60-4f8d-8915-9dfa086686b6.png)
+
 ## Installation
 
 As usual, use your favourite plugin manager, e.g.
