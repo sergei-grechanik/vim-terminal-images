@@ -55,6 +55,7 @@ function! terminal_images#UploadTerminalImage(filename, params) abort
                 \ flags .
                 \ " " . filename_str .
                 \ " 2> " . shellescape(errfile)
+    let command = "stty -echo; " . command
     call system(command)
     if v:shell_error != 0
         if filereadable(errfile)
@@ -249,6 +250,8 @@ function! terminal_images#UploadPendingImages(params) abort
     let uploading_message =
                 \ popup_atcursor("Uploading images", {'zindex': 1010})
 
+    let needs_redraw = 0
+
     while len(g:terminal_images_pending_uploads) > 0
         let upload = remove(g:terminal_images_pending_uploads,
                     \ len(g:terminal_images_pending_uploads) - 1)
@@ -262,6 +265,7 @@ function! terminal_images#UploadPendingImages(params) abort
         if has_key(cache_record, 'text') && cache_record.cols == cols && cache_record.rows == rows
             let text = cache_record.text
         else
+            let needs_redraw = 1
             echom "Uploading " . filename " (" . cols . "x" . rows . ")"
             call popup_settext(uploading_message, "Uploading " . filename)
             redraw
@@ -285,6 +289,9 @@ function! terminal_images#UploadPendingImages(params) abort
         redraw
     endwhile
     call popup_close(uploading_message)
+    if needs_redraw
+        redraw!
+    endif
 endfun
 
 function! terminal_images#ShowCurrentFile(params) abort
