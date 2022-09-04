@@ -44,6 +44,20 @@ if !exists('g:terminal_images_regex')
     let g:terminal_images_regex = '\c\([a-z0-9_+=/$%-]\+\.\(png\|jpe\?g\|gif\)\)'
 endif
 
+" Try not to position images closer than this num of columns to the right edge.
+if !exists('g:terminal_images_right_margin')
+    let g:terminal_images_right_margin = 1
+endif
+
+" Try not to position images closer than this num of columns to the left edge
+" (only for automatic positioning). If the value of this variable is
+" 'textwidth', textwidth + 1 will be used. If the value is 'auto', it will be
+" computed as the max line width displayed on the screen (but not higher than
+" textwidth + 1).
+if !exists('g:terminal_images_left_margin')
+    let g:terminal_images_left_margin = 0
+endif
+
 if !exists('g:terminal_images_auto')
     let g:terminal_images_auto = 1
 endif

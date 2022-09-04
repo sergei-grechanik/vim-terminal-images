@@ -25,7 +25,8 @@ function! terminal_images#UploadTerminalImage(filename, params) abort
     " so that the image fits in the window.
     let maxcols = s:Get('terminal_images_max_columns')
     let maxrows = s:Get('terminal_images_max_rows')
-    let maxcols = min([maxcols, &columns, s:GetWindowWidth() - 2])
+    let right_margin = s:Get('terminal_images_right_margin')
+    let maxcols = min([maxcols, &columns, s:GetWindowWidth() - right_margin])
     let maxrows = min([maxrows, &lines, winheight(0) - 2])
     let maxcols = max([1, maxcols])
     let maxrows = max([1, maxrows])
@@ -305,7 +306,8 @@ function! terminal_images#ShowCurrentFile(params) abort
     endif
 
     let win_width = s:GetWindowWidth()
-    let maxcols = win_width - 2
+    let right_margin = s:Get('terminal_images_right_margin')
+    let maxcols = win_width - right_margin
     let maxrows = winheight(0) - 2
     if maxcols < 1 || maxrows < 1
         return
@@ -363,20 +365,24 @@ function! terminal_images#ShowAllImages(params) abort
     let win_width = s:GetWindowWidth()
     let maxcols = s:Get('terminal_images_max_columns')
     let maxrows = s:Get('terminal_images_max_rows')
-    let maxcols = min([maxcols, &columns, win_width - 2])
+    let right_margin = s:Get('terminal_images_right_margin')
+    let maxcols = min([maxcols, &columns, win_width - right_margin])
     let maxrows = min([maxrows, &lines, winheight(0) - 2])
     let maxcols = max([1, maxcols])
     let maxrows = max([1, maxrows])
 
     let match_list = []
     let line_widths = []
+    let max_linewidth = 0
 
     for line in range(line('w0'), line('w$'))
         if line < 1
             continue
         endif
         let line_str = getline(line)
-        call add(line_widths, strdisplaywidth(line_str) + 1)
+        let line_width = strdisplaywidth(line_str) + 1
+        let max_linewidth = max([max_linewidth, line_width])
+        call add(line_widths, line_width)
 
         if len(match_list) >= 32
             continue
@@ -387,6 +393,19 @@ function! terminal_images#ShowAllImages(params) abort
         for m in matches
             call add(match_list, [line, m])
         endfor
+    endfor
+
+    let left_margin = s:Get('terminal_images_left_margin')
+    if type(left_margin) == v:t_string
+        if left_margin ==# "textwidth"
+            let left_margin = &textwidth + 1
+        elseif left_margin ==# "auto"
+            let left_margin = min([&textwidth + 1, max_linewidth])
+        endif
+    endif
+
+    for i in range(len(line_widths))
+        let line_widths[i] = max([line_widths[i], left_margin])
     endfor
 
     let prev_window_width = get(w:, 'terminal_images_prev_window_width', 0)
@@ -407,7 +426,8 @@ function! terminal_images#ShowAllImages(params) abort
             endif
         endfor
         for i in range(len(match_list))
-            if match_list[i][0] != match_list[i][0] || match_list[i][1] != match_list[i][1]
+            if match_list[i][0] != prev_match_list[i][0] ||
+                        \ match_list[i][1] != prev_match_list[i][1]
                 let differ = 1
                 break
             endif
@@ -487,7 +507,8 @@ function! terminal_images#ShowAllImages(params) abort
 
         let cols = str2nr(dims[0])
         let rows = str2nr(dims[1])
-        let best_pos = s:FindBestPosition(win_width - 1, line_widths, line - line('w0'), cols, rows)
+        let best_pos = s:FindBestPosition(win_width - right_margin,
+                       \ line_widths, line - line('w0'), cols, rows)
         if len(best_pos) == 0
             continue
         endif

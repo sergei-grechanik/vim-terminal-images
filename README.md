@@ -71,3 +71,20 @@ Doesn't influence the size of the current file preview.
 
     " Use the command on PATH and override ppi for each image
     let g:terminal_images_command="tupimage --override-ppi 96"
+
+### Margins
+
+Margins can be set to prohibit placing preview windows to close to the buffer
+window edges.
+
+    let g:terminal_images_right_margin = 2
+
+Left margin may help it look a bit nicer since left edges of preview windows
+will tend to be aligned.
+
+    " Left margin can be a number of columns
+    let g:terminal_images_left_margin = 20
+    " or 'textwidth' to use &textwidth
+    let g:terminal_images_left_margin = "textwidth"
+    " or 'auto' to compute it atomatically based on the visible lines
+    let g:terminal_images_left_margin = "auto"
