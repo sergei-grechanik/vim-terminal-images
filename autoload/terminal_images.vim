@@ -324,6 +324,8 @@ function! terminal_images#ShowCurrentFile(params) abort
         return
     endif
 
+    call terminal_images#ClearVisibleImages()
+
     let best_cols = str2nr(dims[0])
     let best_rows = str2nr(dims[1])
 
@@ -340,8 +342,8 @@ function! terminal_images#ShowCurrentFile(params) abort
     let background_higroup =
         \ get(b:, 'terminal_images_background', 'TerminalImagesBackground')
     let popup_id = popup_create([filename],
-                \ #{line: 0,
-                \   col: 0,
+                \ #{line: -1,
+                \   col: -strdisplaywidth(getline('w0')[0]),
                 \   pos: 'topleft',
                 \   close: 'click',
                 \   fixed: 1,
@@ -559,7 +561,8 @@ function! terminal_images#CloseObscuringImages() abort
             continue
         endif
         let opts = popup_getoptions(popup_id)
-        if !has_key(opts, 'textprop') || opts.textprop != prop_type_name
+        if opts.title != "Image preview" &&
+            \ (!has_key(opts, 'textprop') || opts.textprop != prop_type_name)
             continue
         endif
         let winpos = win_screenpos(0)
