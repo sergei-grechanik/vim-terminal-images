@@ -82,6 +82,6 @@ command TerminalImagesCloseObscuring :call terminal_images#CloseObscuringImages(
 augroup TerminalImagesAugroup
     autocmd!
     autocmd WinLeave,VimResized * :call terminal_images#CloseObscuringImages()
-    autocmd CursorHold * :call terminal_images#ShowAllMaybe()
+    autocmd CursorHold,BufWinEnter * :call terminal_images#ShowAllMaybe()
     autocmd BufWinEnter * :call terminal_images#ShowCurrentMaybe()
 augroup end
