@@ -363,7 +363,7 @@ function! terminal_images#ShowAllImages(params) abort
             continue
         endif
         let line_str = getline(line)
-        call add(line_widths, strdisplaywidth(line_str))
+        call add(line_widths, strdisplaywidth(line_str) + 1)
 
         if len(match_list) >= 32
             continue
