@@ -143,7 +143,7 @@ function! terminal_images#ShowImageUnderCursor(...) abort
         return
     endif
     if !silent
-        let uploading_message =
+        let uploading_popup =
                     \ popup_atcursor("Uploading " . filename, {'zindex': 1010})
     endif
     redraw
@@ -154,7 +154,7 @@ function! terminal_images#ShowImageUnderCursor(...) abort
         echo "Showing " . filename
     catch
         if !silent
-            call popup_close(uploading_message)
+            call popup_close(uploading_popup)
         endif
         " Vim doesn't want to redraw unless I put echo in between
         redraw!
@@ -166,7 +166,7 @@ function! terminal_images#ShowImageUnderCursor(...) abort
         return
     endtry
     if !silent
-        call popup_close(uploading_message)
+        call popup_close(uploading_popup)
     endif
     let background_higroup =
                 \ get(b:, 'terminal_images_background', 'TerminalImagesBackground')
@@ -247,8 +247,7 @@ function! terminal_images#UploadPendingImages(params) abort
         let flags = " --one-way "
     endif
 
-    let uploading_message =
-                \ popup_atcursor("Uploading images", {'zindex': 1010})
+    let uploading_popup = 0
 
     let needs_redraw = 0
 
@@ -267,7 +266,10 @@ function! terminal_images#UploadPendingImages(params) abort
         else
             let needs_redraw = 1
             echom "Uploading " . filename " (" . cols . "x" . rows . ")"
-            call popup_settext(uploading_message, "Uploading " . filename)
+            if !uploading_popup
+                let uploading_popup = popup_atcursor("", {'zindex': 1010})
+            endif
+            call popup_settext(uploading_popup, "Uploading " . filename)
             redraw
             let text = ["failed", filename]
             try
@@ -288,7 +290,9 @@ function! terminal_images#UploadPendingImages(params) abort
         call popup_settext(popup_id, text)
         redraw
     endwhile
-    call popup_close(uploading_message)
+    if uploading_popup
+        call popup_close(uploading_popup)
+    endif
     if needs_redraw
         redraw!
     endif
