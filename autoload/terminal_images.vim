@@ -301,7 +301,8 @@ endfun
 
 function! terminal_images#ShowCurrentFile(params) abort
     let filename = expand('%:p')
-    if empty(filename) || !filereadable(filename)
+    if empty(filename) || !filereadable(filename) ||
+                \ !(filename =~ s:Get('terminal_images_regex'))
         return
     endif
 
