@@ -56,7 +56,6 @@ function! terminal_images#UploadTerminalImage(filename, params) abort
                 \ flags .
                 \ " " . filename_str .
                 \ " 2> " . shellescape(errfile)
-    let command = "stty -echo; " . command
     call system(command)
     if v:shell_error != 0
         if filereadable(errfile)
@@ -249,10 +248,10 @@ function! terminal_images#UploadPendingImages(params) abort
     endif
 
     let uploading_popup = 0
-
     let needs_redraw = 0
+    let interrupted = 0
 
-    while len(g:terminal_images_pending_uploads) > 0
+    while len(g:terminal_images_pending_uploads) > 0 && !interrupted
         let upload = remove(g:terminal_images_pending_uploads,
                     \ len(g:terminal_images_pending_uploads) - 1)
         let popup_id = upload[0]
@@ -286,11 +285,19 @@ function! terminal_images#UploadPendingImages(params) abort
                 let cache_record.text = text
             catch
                 let text = [v:exception]
+                if v:exception =~# "Interrupted"
+                    let interrupted = 1
+                endif
             endtry
         endif
         call popup_settext(popup_id, text)
         redraw
     endwhile
+    if interrupted
+        " Don't annoy the user with continuing uploads if the process was
+        " deliberately interrupted
+        let g:terminal_images_pending_uploads = []
+    endif
     if uploading_popup
         call popup_close(uploading_popup)
     endif
@@ -322,7 +329,7 @@ function! terminal_images#ShowCurrentFile(params) abort
                 \ " -e /dev/null " .
                 \ " --only-dump-dims " .
                 \ filename_esc
-    let dims = split(system(command), " ")
+    silent let dims = split(system(command), " ")
     if v:shell_error != 0 || len(dims) != 2
         return
     endif
@@ -494,7 +501,7 @@ function! terminal_images#ShowAllImages(params) abort
                         \ " -e /dev/null " .
                         \ " --only-dump-dims " .
                         \ filename_esc
-            let dims = split(system(command), " ")
+            silent let dims = split(system(command), " ")
             if v:shell_error != 0 || len(dims) != 2
                 continue
             endif
@@ -523,10 +530,10 @@ function! terminal_images#ShowAllImages(params) abort
             endif
         endif
         for line_idx in range(best_rows)
-            if best_pos[0] + line_idx >= len(line_widths)
+            if best_line + line_idx >= len(line_widths)
                 break
             endif
-            let line_widths[best_pos[0] + line_idx] = best_column + best_cols
+            let line_widths[best_line + line_idx] = best_column + best_cols
         endfor
         let b:terminal_images_propid_count =
             \ get(b:, 'terminal_images_propid_count', 0) + 1
@@ -534,7 +541,11 @@ function! terminal_images#ShowAllImages(params) abort
         call prop_add(line, 1, #{length: len(getline(line)), type: prop_type_name, id: propid})
         let background_higroup =
             \ get(b:, 'terminal_images_background', 'TerminalImagesBackground')
-        let popup_id = popup_create([filename, string(best_pos)],
+        let pos_text = 'line: ' . string(best_line) .
+                    \ ' col: ' . string(best_column) .
+                    \ ' size: ' . string(best_cols) . ' cols x ' .
+                    \ string(best_rows) . ' rows'
+        let popup_id = popup_create([filename, pos_text],
                     \ #{line: best_line + line('w0') - line - 1,
                     \   col: best_column - strdisplaywidth(getline(line)),
                     \   pos: 'topleft',
