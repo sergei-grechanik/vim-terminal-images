@@ -79,6 +79,9 @@ command TerminalImagesShowUnderCursorIfReadable :call terminal_images#ShowImageU
 command TerminalImagesToggle :call terminal_images#ToggleGlobal()
 command TerminalImagesEnable :call terminal_images#EnableGlobal()
 command TerminalImagesDisable :call terminal_images#DisableGlobal()
+command TerminalImagesEnableBuffer :call terminal_images#EnableBuffer()
+command TerminalImagesDisableBuffer :call terminal_images#DisableBuffer()
+command TerminalImagesUnletBuffer :call terminal_images#ClearBufferEnableSettings()
 " Show the current buffer if it's an image.
 command TerminalImagesShowCurrent :call terminal_images#ShowCurrentFile({})
 " Show all images found in the current window.
