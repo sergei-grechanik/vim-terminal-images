@@ -616,21 +616,21 @@ function! terminal_images#CloseObscuringImages() abort
 endfun
 
 function! terminal_images#ShowAllMaybe() abort
-    if g:terminal_images_auto
+    if s:Get('terminal_images_auto')
         call terminal_images#ShowAllImages({})
-    elseif g:terminal_images_auto_show_current
+    elseif s:Get('terminal_images_auto_show_current')
         call terminal_images#ShowCurrentFile({})
     endif
 endfun
 
 function! terminal_images#ShowCurrentMaybe() abort
-    if g:terminal_images_auto_show_current
+    if s:Get('terminal_images_auto_show_current')
         call terminal_images#ShowCurrentFile({})
     endif
 endfun
 
 function! terminal_images#CloseObscuringMaybe() abort
-    if g:terminal_images_auto
+    if s:Get('terminal_images_auto')
         call terminal_images#CloseObscuringImages()
     endif
 endfun
@@ -654,3 +654,26 @@ function! terminal_images#ToggleGlobal() abort
         call terminal_images#EnableGlobal()
     endif
 endfun
+
+function! terminal_images#EnableBuffer() abort
+    let b:terminal_images_auto = 1
+    call terminal_images#ShowAllImages({})
+    echom "Automatic image display is on for this buffer"
+endfun
+
+function! terminal_images#DisableBuffer() abort
+    let b:terminal_images_auto = 0
+    call terminal_images#ClearVisibleImages()
+    echom "Automatic image display is off for this buffer"
+endfun
+
+function! terminal_images#ClearBufferEnableSettings() abort
+    unlet b:terminal_images_auto
+    if s:Get('terminal_images_auto')
+      call terminal_images#ShowAllImages({})
+    else
+      call terminal_images#ClearVisibleImages()
+    endif
+    echom "Automatic image display uses global settings"
+endfun
+
