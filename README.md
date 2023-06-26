@@ -39,8 +39,14 @@ behavior with the following line:
 
     let g:terminal_images_auto = 0
 
-Or use `:TerminalImagesToggle` to toggle this behavior. When automatic preview
-is disabled you can trigger it manually with `:TerminalImagesShowAll`.
+Or use `:TerminalImagesEnable`, `:TerminalImagesDisable` or
+`:TerminalImagesToggle` to toggle this behavior. When automatic preview is
+disabled you can trigger it manually with `:TerminalImagesShowAll`.
+
+To enable or disable the plugin for the current buffer only, use
+`:TerminalImagesEnableBuffer`, `:TerminalImagesDisableBuffer`. Note that buffer
+settings has a precedence over the gloabl one. To clear the buffer
+setting in favor of the global one, use `:TerminalImagesUnletBuffer`.
 
 To hide images in the current buffer use `:TerminalImagesClear`. If you think
 some of the images failed to upload correctly, use
