@@ -1,9 +1,11 @@
 
 " https://stackoverflow.com/questions/26315925/get-usable-window-width-in-vim-script
 function! s:GetWindowWidth() abort
-    redir =>l:a |exe "sil sign place buffer=".bufnr('')|redir end
-    let l:signlist=split(l:a, '\n')
-    return winwidth(0) - &numberwidth - &foldcolumn - (len(signlist) > 2 ? 2 : 0)
+    let l:width = winwidth(0) - &numberwidth - &foldcolumn
+    if &signcolumn ==# 'yes' || len(sign_getplaced(bufnr(''), #{group: '*'})[0].signs)
+        let l:width -= 2
+    endif
+    return l:width
 endfun
 
 " Get the value of a buffer variable, or a global variable if the buffer
